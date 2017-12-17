@@ -1,6 +1,6 @@
 import unittest
 from multimethods import (MultiMethod, Default, type_dispatch, DispatchException, Anything,
-                          multimethod, is_a)
+                          multimethod, singledispatch, multidispatch, is_a)
 from collections import Iterable
 identity = lambda x: x
 
@@ -285,3 +285,45 @@ class IsA(unittest.TestCase):
         self.assertEqual(self.something(6), 5)
         self.assertEqual(self.something(-10), 0)
         self.assertEqual(self.something(25), 25)
+
+
+class Decorators(unittest.TestCase):
+
+    def test_singledispatch(self):
+        @singledispatch
+        def mm(value):
+            return 'default', value
+
+        @mm.method(dict)
+        def mm_int(value):
+            return 'dict', value
+
+        @mm.method(str)
+        def mm_str(value):
+            return 'str', value
+
+        @mm.method(float)
+        def mm_str(value):
+            return 'float', value
+
+        self.assertEqual(mm({}), ('dict', {}))
+        self.assertEqual(mm(12345), ('default', 12345))
+        self.assertEqual(mm(123.45), ('float', 123.45))
+        self.assertEqual(mm('foo'), ('str', 'foo'))
+
+    def test_multiispatch(self):
+        @multidispatch
+        def mm(*args):
+            return 'default', args
+
+        @mm.method((dict, list))
+        def mm_int(a, b):
+            return 'dict+list', a, b
+
+        @mm.method((str, float))
+        def mm_str(a, b):
+            return 'str+float', a, b
+
+        self.assertEqual(mm({}, []), ('dict+list', {}, []))
+        self.assertEqual(mm(12345), ('default', (12345,)))
+        self.assertEqual(mm('foo', 123.45), ('str+float', 'foo', 123.45))
