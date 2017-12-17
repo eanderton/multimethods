@@ -37,6 +37,48 @@ if 'Anything' not in globals():
     Anything = AnythingType()
 
 
+class _FeatureFlag(object):
+    '''
+    Basic feature flag implementation. Used to turn on/off library features.
+
+    As a bool wrapper, this may be safely used as a default value in library
+    methods and functions for run-time evaluation of a default argument.
+    '''
+    def __init__(self, value=False):
+        self.value = bool(value)
+
+    def __bool__(self):
+        return self.value
+    
+    def __nonzero__(self):
+        return self.__bool__()
+
+
+_descriptor_interface_feature = _FeatureFlag(False)
+
+
+def enable_descriptor_interface():
+    '''
+    Enables feature flag for descriptor interface compatibility on mutlimethods.
+
+    By default multimethods do not forward 'self' for class methods.  Enabling this
+    feature will set the module default to enable this behavior.
+
+    If backwards compatibility is desired, it is recommended that `pass_self=True`
+    argument on MultiMethod and @multimethod are used instead.
+    '''
+    _descriptor_interface_feature.value = True
+
+
+def disable_descriptor_interface():
+    '''
+    Disables feature flag for descriptor interface compatibility on mutlimethods (default).
+
+    See documentation for enable_descriptor_interface() for more information.
+    '''
+    _descriptor_interface_feature.value = False
+
+
 def _parents(x):
     return (hasattr(x, '__bases__') and x.__bases__) or ()
 
@@ -53,9 +95,38 @@ class DispatchException(Exception):
     pass
 
 
+class _MultiMethodProxy(object):
+    '''
+    Shim designed for use by MultiMethod.__get__, so MultiMethod may implement the 
+    'descriptor' protocol.
+    
+    When a method is invoked, the class' __get__ method is called to return a 'bound function' 
+    that is tied to the current object instance.  This proxy simulates a bound function 
+    multimethod by forwarding all properties to the parent MultiMethod, and re-implementing 
+    __call__ such that it provides the object instance as 'self' to the best-matched function.
+    '''
+
+    def __init__(self, instance, mm):
+        self.__dict__['instance'] = instance
+        self.__dict__['mm'] = mm
+
+    def __getattr__(self, *args, **kwargs):
+        return getattr(self.__dict__['mm'], *args, **kwargs)
+
+    def __setattr__(self, *args):
+        return setattr(self.__dict__['mm'], *args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        mm = self.__dict__['mm']
+        instance = self.__dict__['instance']
+        dv = mm.dispatchfn(*args, **kwargs)
+        best = mm.get_method(dv)
+        return best(instance, *args, **kwargs)
+
+
 class MultiMethod(object):
 
-    def __init__(self, name, dispatchfn):
+    def __init__(self, name, dispatchfn, pass_self=_descriptor_interface_feature):
         if not callable(dispatchfn):
             raise TypeError('dispatch function must be a callable')
 
@@ -64,12 +135,21 @@ class MultiMethod(object):
         self.preferences = {}
         self.cache = {}
         self.__name__ = name
+        self.pass_self = bool(pass_self)  # force evaluation of feature flag
         # self.cache_hites
 
     def __call__(self, *args, **kwds):
         dv = self.dispatchfn(*args, **kwds)
         best = self.get_method(dv)
         return best(*args, **kwds)
+
+    def __get__(self, instance, owner):
+        '''
+        Return a bound method if invoked on an object instance, and if pass_self is true.
+        '''
+        if instance is None or not self.pass_self:
+            return self
+        return _MultiMethodProxy(instance, self)
 
     def add_method(self, dispatchval, func):
         self.methods[dispatchval] = func
@@ -162,15 +242,18 @@ def _copy_attrs(source, dest):
     dest.__module__ = source.__module__
 
 
-def multimethod(dispatch_func):
+def multimethod(dispatch_func, pass_self=_descriptor_interface_feature):
     '''Create a multimethod that dispatches on the given dispatch_func,
     and uses the given default_func as the default dispatch.  The
     multimethod's descriptive name will also be taken from the
     default_func (its module and name).
 
+    If pass_self is set to True, this multimethod will pass the enclosing
+    object instance as `self` to all associated methods, as though they 
+    were normal class methods (where applicable).
     '''
     def multi_decorator(default_func):
-        m = MultiMethod(default_func.__name__, dispatch_func)
+        m = MultiMethod(default_func.__name__, dispatch_func, pass_self)
         m.add_method(Default, default_func)
         _copy_attrs(default_func, m)
         return m
@@ -181,6 +264,9 @@ def singledispatch(default_func):
     '''Like python 3.4's singledispatch. Create a multimethod that
     does single dispatch by the type of the first argument. The
     wrapped function will be the default dispatch.
+
+    In order to use class methods that use 'self' passing with this decorator,
+    see `enable_descriptor_interface()` for more information.
     '''
     m = MultiMethod(default_func.__name__, single_type_dispatch)
     m.add_method(Default, default_func)
@@ -192,7 +278,9 @@ def multidispatch(default_func):
     '''Create a multimethod that does multiple dispatch by the types of
     all the arguments. The wrapped function will be the default
     dispatch.
-
+    
+    In order to use class methods that use 'self' passing with this decorator,
+    see `enable_descriptor_interface()` for more information.
     '''
     m = MultiMethod(default_func.__name__, type_dispatch)
     m.add_method(Default, default_func)
@@ -234,6 +322,7 @@ def _is_a_anything(x, y):
     return True
 
 
-__all__ = ['MultiMethod', 'type_dispatch', 'single_type_dispatch',
+__all__ = ['enable_descriptor_interface', 'disable_descriptor_interface',
+           'MultiMethod', 'type_dispatch', 'single_type_dispatch',
            'multimethod', 'Default', 'multidispatch', 'singledispatch',
            'Anything']

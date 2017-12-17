@@ -260,6 +260,95 @@ Now your dispatch values can be instances of ``Version``.  So for example
     foo("hi")  # if current version is 2, dispatches to v1.
 
 
+Use with Classes
+----------------
+
+Multimethods may also be used as a class method, to dispatch to other methods within the same class.
+
+.. code:: python
+ 
+    class Adder(object):
+        add = MultiMethod("adder", type_dispatch)
+
+        @add.method((int, int))
+        def add_integers(a, b):
+            return a + b
+
+        @add.method((float, float))
+        def add_floats(a, b):
+            return int(round(a + b))
+
+    adder = Adder()
+    result = adder.add(10, 20)
+    result += adder.add(10.5, 17.3)
+    assert(result == 58) 
+
+
+As the above example illustrates, the multimethod will not forward ``self`` to the methods.  This behavior
+can be changed by creating a multimethod with ``pass_self=True`` as an argument:
+
+.. code:: python
+    # explicit instance style
+    mm = MultiMethod('mm', my_dispatch_function, pass_self=True)
+
+    # decorator style
+    @multimethod(my_dispatch_function, pass_self=True)
+    def mm(...): ...
+
+
+Now the class can be implemented with methods that can see the enclosing object:
+
+.. code:: python
+ 
+    class Adder(object):
+        def __init__(self):
+            self.result = 0
+
+        add = MultiMethod("adder", type_dispatch, pass_self=True)
+
+        @add.method((int, int))
+        def add_integers(self, a, b):
+            self.result += a + b
+
+        @add.method((float, float))
+        def add_floats(self, a, b):
+            self.result += int(round(a + b))
+
+    adder = Adder()
+    adder.add(10, 20)
+    adder.add(10.5, 17.3)
+    assert(adder.result == 58)
+
+
+This feature is made possible by the python descriptor protocol, which only applies to multimethods
+that are invoked as members of a class.  Multimethods that are declared and used outside the context of
+a class, won't have this property, even if ``pass_self`` is set to True.
+
+
+Descriptor Interface Feature Flag
+---------------------------------
+
+By default all multimethods are constructed with ``pass_self=False``.  This default may be changed by using the
+``descriptor_interface`` feature flag.  It may be enabled like so:
+
+.. code:: python
+
+    from multimethod import *
+    enable_descriptor_interface()
+
+
+After this feature is enabled, all subsequent instances of ``MultiMethod`` or invocations of ``@multimethod``,
+``@singledispach``, and ``@multidispatch``. will pass ``self`` to dispatched methods when invoked as a member
+of a class.
+
+The feature may also be disabled, or future-proofed as disabled should it be enabled in a future release:
+
+.. code:: python
+ 
+    from multimethod import *
+    disable_descriptor_interface()
+
+
 Note
 ****
 

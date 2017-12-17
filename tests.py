@@ -1,5 +1,7 @@
 import unittest
-from multimethods import (MultiMethod, Default, type_dispatch, DispatchException, Anything,
+from multimethods import (_FeatureFlag, _descriptor_interface_feature,
+                          enable_descriptor_interface, disable_descriptor_interface,
+                          MultiMethod, Default, type_dispatch, DispatchException, Anything, 
                           multimethod, singledispatch, multidispatch, is_a)
 from collections import Iterable
 identity = lambda x: x
@@ -285,6 +287,120 @@ class IsA(unittest.TestCase):
         self.assertEqual(self.something(6), 5)
         self.assertEqual(self.something(-10), 0)
         self.assertEqual(self.something(25), 25)
+
+
+class PassSelfMultiMethod(unittest.TestCase):
+
+    mm = MultiMethod('mm', type_dispatch, pass_self=True)
+
+    @mm.method(Default)
+    def mm_default(self, value):
+        return self, 'default', value
+
+    @mm.method((dict,))
+    def mm_int(self, value):
+        return self, 'dict', value
+
+    @mm.method((str,))
+    def mm_str(self, value):
+        return self, 'str', value
+
+    @mm.method((float,))
+    def mm_str(self, value):
+        return self, 'float', value
+
+    def test_pass_self(self):
+        self.assertEqual(self.mm({}), (self, 'dict', {}))
+        self.assertEqual(self.mm(12345), (self, 'default', 12345))
+        self.assertEqual(self.mm(123.45), (self, 'float', 123.45))
+        self.assertEqual(self.mm('foo'), (self, 'str', 'foo'))
+
+    def test_unbound_function(self):
+        '''
+        The value of  pass_self is completely irrelevant for 'unbound' free-functions
+        '''
+        mm = MultiMethod('mm', type_dispatch, pass_self=True)
+        
+        @mm.method(Default)
+        def mm_default(value):
+            return value
+        self.assertEqual(mm('hello world'), 'hello world')
+
+
+class PassSelfDecorator(unittest.TestCase):
+
+    @multimethod(type_dispatch, pass_self=True)
+    def mm(self, value):
+        return self, 'default', value
+
+    @mm.method((dict,))
+    def mm_int(self, value):
+        return self, 'dict', value
+
+    @mm.method((str,))
+    def mm_str(self, value):
+        return self, 'str', value
+
+    @mm.method((float,))
+    def mm_str(self, value):
+        return self, 'float', value
+
+    def test_pass_self(self):
+        self.assertEqual(self.mm({}), (self, 'dict', {}))
+        self.assertEqual(self.mm(12345), (self, 'default', 12345))
+        self.assertEqual(self.mm(123.45), (self, 'float', 123.45))
+        self.assertEqual(self.mm('foo'), (self, 'str', 'foo'))
+
+
+class FeatureFlag(unittest.TestCase):
+
+    def test_interface(self):
+        ff = _FeatureFlag()
+        self.assertFalse(ff)
+        ff.value = True
+        self.assertTrue(ff)
+        ff.value = False
+        self.assertFalse(ff)
+
+    def test_default_arg_use(self):
+        '''
+        Python has a quirk where default arguments are evaluated at module import time. By 
+        using a bool wrapper class (FeatureFlag), the default value becomes the object instance
+        instead of a simple True or False.  This allows the default to be modified after
+        declaration.
+        '''
+        ff = _FeatureFlag()
+        def tester(value=ff):
+            return bool(value)
+        
+        self.assertFalse(tester())
+        ff.value = True
+        self.assertTrue(tester())
+
+
+class PassSelfFeatureFlag(unittest.TestCase):
+
+    def test_module_feature_on_off(self):
+        self.assertFalse(_descriptor_interface_feature)
+        enable_descriptor_interface()
+        self.assertTrue(_descriptor_interface_feature)
+        disable_descriptor_interface()
+        self.assertFalse(_descriptor_interface_feature)
+
+    def test_dangling_feature(self):
+        ''' 
+        The feature flag should only be evaluated at construction time, preventing any potential
+        disruption to other multimethod instances.
+        '''
+        class TestClass(object):
+            @multimethod(type_dispatch)
+            def foobar(value):
+                return value
+
+        tc = TestClass()
+        enable_descriptor_interface()
+        self.assertEquals(tc.foobar('hello world'), 'hello world')
+        disable_descriptor_interface() 
 
 
 class Decorators(unittest.TestCase):
